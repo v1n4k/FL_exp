@@ -12,11 +12,11 @@ import numpy as np
 import torch
 import os
 
-from .config import ExperimentCfg
-from .data import prepare_dataloaders
-from .fl_client import FedSAFoldClient
-from .fl_strategy import FedSAFoldStrategy
-from .model import build_model
+from config import ExperimentCfg
+from data import prepare_dataloaders
+from fl_client import FedSAFoldClient
+from fl_strategy import FedSAFoldStrategy
+from model import build_model
 
 
 def set_seed(seed: int):

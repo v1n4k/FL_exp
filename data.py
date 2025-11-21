@@ -9,7 +9,7 @@ from datasets import Dataset, DatasetDict, load_dataset
 from torch.utils.data import DataLoader, Subset
 from transformers import AutoTokenizer
 
-from .config import DataCfg, ExperimentCfg
+from config import DataCfg, ExperimentCfg
 
 
 def load_and_tokenize(data_cfg: DataCfg, base_model: str, seed: int) -> Tuple[DatasetDict, AutoTokenizer, int]:

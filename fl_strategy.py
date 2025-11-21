@@ -8,10 +8,10 @@ import torch
 import flwr as fl
 from flwr.common import FitRes, Parameters, ndarrays_to_parameters, parameters_to_ndarrays
 
-from .config import ExperimentCfg
-from .lora_utils import lora_a_to_b_name, split_lora_params
-from .rpca_utils import robust_pca
-from .train_loop import evaluate as eval_fn
+from config import ExperimentCfg
+from lora_utils import lora_a_to_b_name, split_lora_params
+from rpca_utils import robust_pca
+from train_loop import evaluate as eval_fn
 
 
 def state_dict_to_ndarrays(state_dict: Dict[str, torch.Tensor], param_names: List[str]) -> List[np.ndarray]:

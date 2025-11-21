@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Central place to set all simulation configs; everything is forwarded to main.py.
 set -euo pipefail
+cd "$(dirname "$0")"
 
 # ------------------------
 # Editable configuration:
@@ -45,4 +46,4 @@ if [[ "$USE_WANDB" -ne 0 ]]; then
   args+=(--use-wandb --wandb-project "$WANDB_PROJECT")
 fi
 
-python -m fedsa_fold.main "${args[@]}" "$@"
+python main.py "${args[@]}" "$@"

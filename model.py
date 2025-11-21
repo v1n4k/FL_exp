@@ -6,8 +6,8 @@ from typing import Dict, Tuple
 import torch
 from transformers import AutoModelForSequenceClassification
 
-from .config import ExperimentCfg
-from .lora_utils import add_lora_to_model, mark_only_lora_trainable, ordered_param_names
+from config import ExperimentCfg
+from lora_utils import add_lora_to_model, mark_only_lora_trainable, ordered_param_names
 
 
 def build_model(cfg: ExperimentCfg, num_labels: int) -> Tuple[torch.nn.Module, Dict[str, torch.Tensor], list[str]]:
@@ -19,4 +19,3 @@ def build_model(cfg: ExperimentCfg, num_labels: int) -> Tuple[torch.nn.Module, D
     state = model.state_dict()
     names = ordered_param_names(state)
     return model, state, names
-

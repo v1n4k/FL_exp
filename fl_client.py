@@ -8,9 +8,9 @@ import torch
 import flwr as fl
 from torch.utils.data import DataLoader
 
-from .config import ExperimentCfg
-from .lora_utils import lora_a_to_b_name, split_lora_params
-from .train_loop import clone_state_dict, train_one_round
+from config import ExperimentCfg
+from lora_utils import lora_a_to_b_name, split_lora_params
+from train_loop import clone_state_dict, train_one_round
 
 
 class FedSAFoldClient(fl.client.NumPyClient):

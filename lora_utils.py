@@ -6,7 +6,7 @@ from typing import Dict, Iterable, List, Tuple
 import torch
 from peft import LoraConfig, get_peft_model
 
-from .config import LoraCfg
+from config import LoraCfg
 
 LoraAB = Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
 
@@ -71,4 +71,3 @@ def ordered_param_names(state_dict: Dict[str, torch.Tensor]) -> List[str]:
 
 def tensors_to_device(tensors: Iterable[torch.Tensor], device) -> List[torch.Tensor]:
     return [t.to(device) for t in tensors]
-
