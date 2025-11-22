@@ -65,7 +65,12 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         instructions = []
         for client in clients:
             cid = getattr(client, "cid", "unknown")
-            client_config = {"T": self.client_T.get(cid, {})}
+            # Flower config must be simple types; pack T as lists of names and bytes
+            T_dict = self.client_T.get(cid, {})
+            client_config = {}
+            if T_dict:
+                client_config["T_names"] = list(T_dict.keys())
+                client_config["T_vals"] = [v.astype(np.float32).tobytes() for v in T_dict.values()]
             instructions.append(fl.common.FitIns(parameters=parameters, config=client_config))
         return list(zip(clients, instructions))
 

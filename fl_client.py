@@ -68,13 +68,17 @@ class FedSAFoldClient(fl.client.NumPyClient):
                 state[name] = torch.tensor(array, device=self.device)
         self.model.load_state_dict(state, strict=False)
 
-    def _apply_T_to_B(self, T_dict: Dict[str, np.ndarray]):
-        if not T_dict:
+    def _apply_T_to_B(self, config: Dict[str, Any]):
+        names = config.get("T_names", [])
+        vals = config.get("T_vals", [])
+        if not names or not vals:
             return
         state = self.model.state_dict()
-        for name_B, T_np in T_dict.items():
+        r = self.cfg.lora.r
+        for name_B, raw in zip(names, vals):
             if name_B not in state:
                 continue
+            T_np = np.frombuffer(raw, dtype=np.float32).reshape(r, r)
             B = state[name_B].to(self.device)
             T = torch.tensor(T_np, device=self.device, dtype=B.dtype)
             I = torch.eye(T.shape[0], device=self.device, dtype=B.dtype)
@@ -87,7 +91,7 @@ class FedSAFoldClient(fl.client.NumPyClient):
             self.set_parameters(parameters)
 
             # fold residuals into B if provided
-            self._apply_T_to_B(config.get("T", {}))
+            self._apply_T_to_B(config)
 
             # snapshot of A before training
             state_before = clone_state_dict(self.model)
