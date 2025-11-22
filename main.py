@@ -62,6 +62,7 @@ def main():
     set_seed(cfg.seed)
 
     client_loaders, val_loader, holdout_loader, test_loader, tokenizer, num_labels = prepare_dataloaders(cfg)
+    gpu_count = torch.cuda.device_count()
 
     # Build a template model for parameter ordering/state
     _, template_state, param_names = build_model(cfg, num_labels)
@@ -116,7 +117,10 @@ def main():
     def client_fn(cid: str):
         cid_int = int(cid)
         loader = client_loaders[cid_int]
-        return FedSAFoldClient(cid, loader, model_builder, cfg, param_names)
+        device_override = None
+        if gpu_count > 0:
+            device_override = f"cuda:{cid_int % gpu_count}"
+        return FedSAFoldClient(cid, loader, model_builder, cfg, param_names, device_override=device_override)
 
     server_config = fl.server.ServerConfig(num_rounds=cfg.train.num_rounds)
     fl.simulation.start_simulation(

@@ -21,11 +21,13 @@ class FedSAFoldClient(fl.client.NumPyClient):
         model_builder,
         cfg: ExperimentCfg,
         param_names: List[str],
+        device_override: str | None = None,
     ):
         self.cid = cid
         self.dataloader = dataloader
         self.cfg = cfg
-        self.device = torch.device(cfg.train.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        chosen_device = device_override or cfg.train.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(chosen_device)
 
         model, _, _ = model_builder()
         self.model = model.to(self.device)
@@ -79,30 +81,34 @@ class FedSAFoldClient(fl.client.NumPyClient):
         self.model.load_state_dict(state, strict=False)
 
     def fit(self, parameters: List[np.ndarray], config: Dict[str, Any]) -> tuple[list[np.ndarray], int, dict]:
-        # apply global A/base, keep local B
-        self.set_parameters(parameters)
+        try:
+            # apply global A/base, keep local B
+            self.set_parameters(parameters)
 
-        # fold residuals into B if provided
-        self._apply_T_to_B(config.get("T", {}))
+            # fold residuals into B if provided
+            self._apply_T_to_B(config.get("T", {}))
 
-        # snapshot of A before training
-        state_before = clone_state_dict(self.model)
-        a_before, _ = split_lora_params(state_before)
+            # snapshot of A before training
+            state_before = clone_state_dict(self.model)
+            a_before, _ = split_lora_params(state_before)
 
-        loss, num_examples = train_one_round(
-            self.model, self.dataloader, self.device, lr=self.cfg.train.lr, epochs=self.cfg.train.local_epochs
-        )
+            loss, num_examples = train_one_round(
+                self.model, self.dataloader, self.device, lr=self.cfg.train.lr, epochs=self.cfg.train.local_epochs
+            )
 
-        state_after = self.model.state_dict()
-        a_after, b_after = split_lora_params(state_after)
-        self.B_state = {k: v.detach().clone() for k, v in b_after.items()}
+            state_after = self.model.state_dict()
+            a_after, b_after = split_lora_params(state_after)
+            self.B_state = {k: v.detach().clone() for k, v in b_after.items()}
 
-        # upload only delta A parameters
-        delta_a_payload = [
-            (a_after[name] - a_before[name]).detach().cpu().numpy() for name in self.lora_a_names
-        ]
-        metrics = {"loss": float(loss)}
-        return delta_a_payload, num_examples, metrics
+            # upload only delta A parameters
+            delta_a_payload = [
+                (a_after[name] - a_before[name]).detach().cpu().numpy() for name in self.lora_a_names
+            ]
+            metrics = {"loss": float(loss)}
+            return delta_a_payload, num_examples, metrics
+        except Exception as exc:  # surface client-side errors to logs
+            print(f"[Client {self.cid}] fit failed: {exc}")
+            raise
 
     def evaluate(self, parameters: List[np.ndarray], config: Dict[str, Any]):
         # For brevity, skip client-side evaluation in this prototype
