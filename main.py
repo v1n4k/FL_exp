@@ -131,7 +131,7 @@ def main():
         client_resources["num_gpus"] = cfg.train.gpus_per_client
     ray_init_args = {"include_dashboard": False, "log_to_driver": True, "logging_level": "DEBUG"}
 
-    fl.simulation.start_simulation(
+    history = fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=cfg.train.num_clients,
         config=server_config,
@@ -144,6 +144,10 @@ def main():
     final_metrics = strategy.evaluate_global(holdout_loader, model_builder)
     print("Final holdout metrics:", final_metrics)
     log_fn({"stage": "holdout_final", **final_metrics})
+
+    # Early stopping check: stop if no improvement for 3 rounds
+    if strategy.no_improve_rounds >= 3:
+        print(f"Early stopping triggered after {strategy.no_improve_rounds} stale rounds (best val loss {strategy.best_val_loss})")
 
     if wandb_run:
         wandb_run.finish()

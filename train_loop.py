@@ -31,6 +31,12 @@ def train_one_round(
         print("[Train] names:", trainable_names)
 
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
+    total_steps = epochs * len(dataloader)
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=max(1, total_steps // 10),
+        num_training_steps=max(1, total_steps),
+    )
     total = len(dataloader.dataset)
     global_step = 0
     total_loss = 0.0
@@ -43,6 +49,7 @@ def train_one_round(
             loss = outputs.loss
             loss.backward()
             optimizer.step()
+            scheduler.step()
             total_loss += loss.item()
             global_step += 1
 

@@ -54,6 +54,8 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.parameters = ndarrays_to_parameters(state_dict_to_ndarrays(self.global_state, self.param_names))
         self.logged_metrics: List[Dict[str, Any]] = []
         self.log_fn = log_fn
+        self.best_val_loss: float | None = None
+        self.no_improve_rounds: int = 0
 
     # Flower hooks ---------------------------------------------------------
     def initialize_parameters(self, client_manager) -> Parameters:
@@ -179,6 +181,16 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.logged_metrics.append(metrics_with_round)
         if self.log_fn:
             self.log_fn({"stage": "val", **metrics_with_round})
+
+        # early stopping on validation loss
+        val_loss = metrics.get("loss")
+        if val_loss is not None:
+            if self.best_val_loss is None or val_loss < self.best_val_loss - 1e-4:
+                self.best_val_loss = val_loss
+                self.no_improve_rounds = 0
+            else:
+                self.no_improve_rounds += 1
+        return 0.0, metrics
         return 0.0, metrics
 
     # Helper for external calls (main.py)
