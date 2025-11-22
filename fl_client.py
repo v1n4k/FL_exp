@@ -124,15 +124,11 @@ class FedSAFoldClient(fl.client.NumPyClient):
             ]
 
             # diagnostics
-            delta_a_norm = float(
-                torch.sqrt(
-                    sum(torch.sum((a_after[n] - a_before[n]) ** 2) for n in self.lora_a_names if n in a_after)
-                )
+            delta_a_norm = sum(
+                float(torch.sum((a_after[n] - a_before[n]) ** 2).sqrt().cpu()) for n in self.lora_a_names if n in a_after
             )
-            delta_cls_norm = float(
-                torch.sqrt(
-                    sum(torch.sum((state_after[n] - state_before[n]) ** 2) for n in self.classifier_names)
-                )
+            delta_cls_norm = sum(
+                float(torch.sum((state_after[n] - state_before[n]) ** 2).sqrt().cpu()) for n in self.classifier_names
             )
             print(
                 f"[Client {self.cid}] samples={num_examples}, loss={loss:.4f}, "
