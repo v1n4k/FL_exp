@@ -126,7 +126,7 @@ def main():
     client_resources = {"num_cpus": 1, "num_gpus": 0.0}
     if torch.cuda.is_available() and cfg.train.gpus_per_client > 0:
         client_resources["num_gpus"] = cfg.train.gpus_per_client
-    ray_init_args = {"include_dashboard": False, "log_to_driver": True}
+    ray_init_args = {"include_dashboard": False, "log_to_driver": True, "logging_level": "DEBUG"}
 
     fl.simulation.start_simulation(
         client_fn=client_fn,

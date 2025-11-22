@@ -108,7 +108,10 @@ class FedSAFoldClient(fl.client.NumPyClient):
             metrics = {"loss": float(loss)}
             return delta_a_payload, num_examples, metrics
         except Exception as exc:  # surface client-side errors to logs
+            import traceback
+
             print(f"[Client {self.cid}] fit failed: {exc}")
+            traceback.print_exc()
             raise
 
     def evaluate(self, parameters: List[np.ndarray], config: Dict[str, Any]):

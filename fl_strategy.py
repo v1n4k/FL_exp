@@ -75,6 +75,11 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         results: List[Tuple[fl.server.client_proxy.ClientProxy, FitRes]],
         failures: List[Any],
     ) -> Tuple[Parameters, Dict[str, Any]]:
+        if failures:
+            print(f"[Server] aggregate_fit saw {len(failures)} failures")
+            for f in failures:
+                print(f"[Server] failure detail: {f}")
+
         if not results:
             return self.parameters, {}
 
