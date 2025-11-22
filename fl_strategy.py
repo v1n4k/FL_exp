@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, Callable, Optional
+import base64
+import json
 
 import numpy as np
 import torch
@@ -65,12 +67,15 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         instructions = []
         for client in clients:
             cid = getattr(client, "cid", "unknown")
-            # Flower config must be simple types; pack T as lists of names and bytes
+            # Flower config must be scalar types; pack T into a single base64-encoded JSON string
             T_dict = self.client_T.get(cid, {})
             client_config = {}
             if T_dict:
-                client_config["T_names"] = list(T_dict.keys())
-                client_config["T_vals"] = [v.astype(np.float32).tobytes() for v in T_dict.values()]
+                payload = {
+                    name: base64.b64encode(v.astype(np.float32).tobytes()).decode("ascii")
+                    for name, v in T_dict.items()
+                }
+                client_config["T_blob"] = json.dumps(payload)
             instructions.append(fl.common.FitIns(parameters=parameters, config=client_config))
         return list(zip(clients, instructions))
 

@@ -16,6 +16,7 @@ cd "$(dirname "$0")"
 # INIT_NOISE_STD   : stddev of Gaussian noise added to LoRA params at client init (0 disables)
 # USE_WANDB        : set to 1 to enable Weights & Biases logging
 # WANDB_PROJECT    : wandb project name when USE_WANDB=1
+# GPUS_PER_CLIENT  : number of GPUs to allocate per client (can be fractional)
 
 NUM_CLIENTS=4
 ROUNDS=20

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+import base64
+import json
 
 import numpy as np
 import torch
@@ -69,16 +71,23 @@ class FedSAFoldClient(fl.client.NumPyClient):
         self.model.load_state_dict(state, strict=False)
 
     def _apply_T_to_B(self, config: Dict[str, Any]):
-        names = config.get("T_names", [])
-        vals = config.get("T_vals", [])
-        if not names or not vals:
+        blob = config.get("T_blob")
+        if not blob:
+            return
+        try:
+            payload = json.loads(blob)
+        except Exception:
             return
         state = self.model.state_dict()
         r = self.cfg.lora.r
-        for name_B, raw in zip(names, vals):
+        for name_B, b64 in payload.items():
             if name_B not in state:
                 continue
-            T_np = np.frombuffer(raw, dtype=np.float32).reshape(r, r)
+            try:
+                raw = base64.b64decode(b64)
+                T_np = np.frombuffer(raw, dtype=np.float32).reshape(r, r)
+            except Exception:
+                continue
             B = state[name_B].to(self.device)
             T = torch.tensor(T_np, device=self.device, dtype=B.dtype)
             I = torch.eye(T.shape[0], device=self.device, dtype=B.dtype)
