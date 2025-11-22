@@ -38,6 +38,7 @@ class FedSAFoldClient(fl.client.NumPyClient):
         # ordering
         self.param_names = param_names
         self.lora_a_names = [n for n in param_names if "lora_A" in n]
+        self.classifier_names = [n for n in param_names if n.startswith("classifier")]
 
         # initialize B cache
         _, b_state = split_lora_params(self.model.state_dict())
@@ -114,12 +115,15 @@ class FedSAFoldClient(fl.client.NumPyClient):
             a_after, b_after = split_lora_params(state_after)
             self.B_state = {k: v.detach().clone() for k, v in b_after.items()}
 
-            # upload only delta A parameters
+            # compute deltas for LoRA A and classifier head
             delta_a_payload = [
                 (a_after[name] - a_before[name]).detach().cpu().numpy() for name in self.lora_a_names
             ]
+            delta_classifier = [
+                (state_after[name] - state_before[name]).detach().cpu().numpy() for name in self.classifier_names
+            ]
             metrics = {"loss": float(loss)}
-            return delta_a_payload, num_examples, metrics
+            return delta_a_payload + delta_classifier, num_examples, metrics
         except Exception as exc:  # surface client-side errors to logs
             import traceback
 

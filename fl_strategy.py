@@ -50,6 +50,7 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.model_builder = model_builder
         self.client_T: Dict[str, Dict[str, np.ndarray]] = {}
         self.lora_a_names = [n for n in param_names if "lora_A" in n]
+        self.classifier_names = [n for n in param_names if n.startswith("classifier")]
         self.parameters = ndarrays_to_parameters(state_dict_to_ndarrays(self.global_state, self.param_names))
         self.logged_metrics: List[Dict[str, Any]] = []
         self.log_fn = log_fn
@@ -93,12 +94,17 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         if not results:
             return self.parameters, {}
 
-        # Collect delta A matrices per client
+        # Collect delta A and classifier deltas per client
         client_delta_a: Dict[str, Dict[str, np.ndarray]] = {}
+        client_delta_cls: Dict[str, Dict[str, np.ndarray]] = {}
         for client, fit_res in results:
             cid = getattr(client, "cid", "unknown")
             arrays = parameters_to_ndarrays(fit_res.parameters)
-            client_delta_a[cid] = {name: arr for name, arr in zip(self.lora_a_names, arrays)}
+            split = len(self.lora_a_names)
+            arr_a = arrays[:split]
+            arr_cls = arrays[split:]
+            client_delta_a[cid] = {name: arr for name, arr in zip(self.lora_a_names, arr_a)}
+            client_delta_cls[cid] = {name: arr for name, arr in zip(self.classifier_names, arr_cls)}
 
         # Aggregate each LoRA A with RPCA
         for name in self.lora_a_names:
@@ -128,6 +134,17 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
                 T_i = S_i @ A_pinv
                 b_name = lora_a_to_b_name(name)
                 self.client_T.setdefault(cid, {})[b_name] = T_i
+
+        # Aggregate classifier head with simple mean of deltas
+        if self.classifier_names:
+            for name in self.classifier_names:
+                deltas = [client_delta_cls[cid][name] for cid in client_delta_cls if name in client_delta_cls[cid]]
+                if not deltas:
+                    continue
+                mean_delta = np.mean(np.stack(deltas, axis=0), axis=0)
+                self.global_state[name] = torch.tensor(
+                    self.global_state[name].cpu().numpy() + mean_delta, dtype=self.global_state[name].dtype
+                )
 
         # Update stored parameters for the next round
         ndarrays = state_dict_to_ndarrays(self.global_state, self.param_names)

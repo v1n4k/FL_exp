@@ -51,10 +51,13 @@ def merge_lora_params(
 
 
 def mark_only_lora_trainable(model):
-    """Freeze the base model and keep LoRA adapters trainable."""
+    """Freeze the base model; keep LoRA adapters and classifier head trainable."""
 
     for name, param in model.named_parameters():
-        param.requires_grad = "lora_" in name
+        if "lora_" in name or name.startswith("classifier"):
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
 
 
 def lora_a_to_b_name(name: str) -> str:
