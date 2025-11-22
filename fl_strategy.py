@@ -120,6 +120,27 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         metrics = {"server_round": server_round}
         return self.parameters, metrics
 
+    def configure_evaluate(
+        self, server_round: int, parameters: Parameters, client_manager
+    ) -> List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.EvalIns]]:
+        """
+        Configure the next round of evaluation.
+        Since we're doing server-side evaluation only, we return an empty list.
+        """
+        return []
+
+    def aggregate_evaluate(
+        self,
+        server_round: int,
+        results: List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.EvaluateRes]],
+        failures: List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.EvaluateRes]],
+    ) -> Tuple[float, Dict[str, Any]]:
+        """
+        Aggregate evaluation results.
+        Since we're doing server-side evaluation only, we return dummy values.
+        """
+        return 0.0, {}
+
     def evaluate(self, server_round: int, parameters: Parameters):
         metrics = self.evaluate_global(self.eval_loader, self.model_builder, parameters=parameters)
         metrics_with_round = {"round": server_round, **metrics}
