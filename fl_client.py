@@ -122,6 +122,23 @@ class FedSAFoldClient(fl.client.NumPyClient):
             delta_classifier = [
                 (state_after[name] - state_before[name]).detach().cpu().numpy() for name in self.classifier_names
             ]
+
+            # diagnostics
+            delta_a_norm = float(
+                torch.sqrt(
+                    sum(torch.sum((a_after[n] - a_before[n]) ** 2) for n in self.lora_a_names if n in a_after)
+                )
+            )
+            delta_cls_norm = float(
+                torch.sqrt(
+                    sum(torch.sum((state_after[n] - state_before[n]) ** 2) for n in self.classifier_names)
+                )
+            )
+            print(
+                f"[Client {self.cid}] samples={num_examples}, loss={loss:.4f}, "
+                f"deltaA_norm={delta_a_norm:.4e}, deltaCLS_norm={delta_cls_norm:.4e}"
+            )
+
             metrics = {"loss": float(loss)}
             return delta_a_payload + delta_classifier, num_examples, metrics
         except Exception as exc:  # surface client-side errors to logs

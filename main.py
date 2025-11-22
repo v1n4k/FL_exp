@@ -65,6 +65,9 @@ def main():
 
     client_loaders, val_loader, holdout_loader, test_loader, tokenizer, num_labels = prepare_dataloaders(cfg)
     gpu_count = torch.cuda.device_count()
+    # Diagnostics: print client dataset sizes
+    for cid, loader in client_loaders.items():
+        print(f"[Data] client {cid} size: {len(loader.dataset)}")
 
     # Build a template model for parameter ordering/state
     _, template_state, param_names = build_model(cfg, num_labels)
