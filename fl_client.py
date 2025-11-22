@@ -28,6 +28,7 @@ class FedSAFoldClient(fl.client.NumPyClient):
         self.cfg = cfg
         chosen_device = device_override or cfg.train.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(chosen_device)
+        print(f"[Client {cid}] using device {self.device}")
 
         model, _, _ = model_builder()
         self.model = model.to(self.device)

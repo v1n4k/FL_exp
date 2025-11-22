@@ -41,6 +41,7 @@ class TrainCfg:
     method: str = "fedsa_fold"  # extensible switch
     device: str | None = None
     init_noise_std: float = 0.0
+    gpus_per_client: float = 0.0  # set >0 to allocate GPU via Flower/Ray
 
 
 @dataclass

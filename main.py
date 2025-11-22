@@ -40,6 +40,7 @@ def parse_args() -> ExperimentCfg:
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument("--wandb-project", type=str, default="fedsa-fold")
     parser.add_argument("--init-noise-std", type=float, default=0.0)
+    parser.add_argument("--gpus-per-client", type=float, default=1.0)
     args = parser.parse_args()
 
     cfg = ExperimentCfg()
@@ -50,6 +51,7 @@ def parse_args() -> ExperimentCfg:
     cfg.train.batch_size = args.batch_size
     cfg.train.lr = args.lr
     cfg.train.init_noise_std = args.init_noise_std
+    cfg.train.gpus_per_client = args.gpus_per_client
     cfg.data.dirichlet_alpha = args.alpha
     cfg.data.max_length = args.max_length
     cfg.extra["use_wandb"] = str(args.use_wandb)
@@ -117,17 +119,22 @@ def main():
     def client_fn(cid: str):
         cid_int = int(cid)
         loader = client_loaders[cid_int]
-        device_override = None
-        if gpu_count > 0:
-            device_override = f"cuda:{cid_int % gpu_count}"
-        return FedSAFoldClient(cid, loader, model_builder, cfg, param_names, device_override=device_override)
+        # Let Ray/Flower assign GPUs via client_resources; avoid manual overrides.
+        return FedSAFoldClient(cid, loader, model_builder, cfg, param_names, device_override=None)
 
     server_config = fl.server.ServerConfig(num_rounds=cfg.train.num_rounds)
+    client_resources = {"num_cpus": 1, "num_gpus": 0.0}
+    if torch.cuda.is_available() and cfg.train.gpus_per_client > 0:
+        client_resources["num_gpus"] = cfg.train.gpus_per_client
+    ray_init_args = {"include_dashboard": False, "log_to_driver": True}
+
     fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=cfg.train.num_clients,
         config=server_config,
         strategy=strategy,
+        client_resources=client_resources,
+        ray_init_args=ray_init_args,
     )
 
     # Final evaluation on held-out split using the server's latest global state

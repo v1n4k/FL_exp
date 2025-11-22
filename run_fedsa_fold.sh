@@ -28,6 +28,7 @@ SEED=42
 INIT_NOISE_STD=0.01
 USE_WANDB=1  
 WANDB_PROJECT="fedsa-fold"
+GPUS_PER_CLIENT=1.0
 # ------------------------
 
 args=(
@@ -40,6 +41,7 @@ args=(
   --max-length "$MAX_LENGTH"
   --seed "$SEED"
   --init-noise-std "$INIT_NOISE_STD"
+  --gpus-per-client "$GPUS_PER_CLIENT"
 )
 
 if [[ "$USE_WANDB" -ne 0 ]]; then
