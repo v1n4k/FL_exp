@@ -54,7 +54,8 @@ def mark_only_lora_trainable(model):
     """Freeze the base model; keep LoRA adapters and classifier head trainable."""
 
     for name, param in model.named_parameters():
-        if "lora_" in name or name.startswith("classifier"):
+        # allow any parameter belonging to classifier head or LoRA adapters
+        if "lora_" in name or "classifier" in name:
             param.requires_grad = True
         else:
             param.requires_grad = False

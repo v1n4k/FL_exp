@@ -50,7 +50,7 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.model_builder = model_builder
         self.client_T: Dict[str, Dict[str, np.ndarray]] = {}
         self.lora_a_names = [n for n in param_names if "lora_A" in n]
-        self.classifier_names = [n for n in param_names if n.startswith("classifier")]
+        self.classifier_names = [n for n in param_names if "classifier" in n]
         self.parameters = ndarrays_to_parameters(state_dict_to_ndarrays(self.global_state, self.param_names))
         self.logged_metrics: List[Dict[str, Any]] = []
         self.log_fn = log_fn

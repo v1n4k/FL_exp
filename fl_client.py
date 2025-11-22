@@ -38,7 +38,7 @@ class FedSAFoldClient(fl.client.NumPyClient):
         # ordering
         self.param_names = param_names
         self.lora_a_names = [n for n in param_names if "lora_A" in n]
-        self.classifier_names = [n for n in param_names if n.startswith("classifier")]
+        self.classifier_names = [n for n in param_names if "classifier" in n]
 
         # initialize B cache
         _, b_state = split_lora_params(self.model.state_dict())

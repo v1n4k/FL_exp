@@ -27,7 +27,8 @@ def train_one_round(
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if verbose:
         trainable_names = [n for n, p in model.named_parameters() if p.requires_grad]
-        print(f"[Train] trainable params: {len(trainable_params)} -> {trainable_names}")
+        print(f"[Train] trainable params: {len(trainable_params)}")
+        print("[Train] names:", trainable_names)
 
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
     total = len(dataloader.dataset)
