@@ -1,7 +1,7 @@
 """Local training and evaluation utilities."""
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 
 import torch
 from torch.utils.data import DataLoader
@@ -18,12 +18,18 @@ def train_one_round(
     device,
     lr: float,
     epochs: int,
+    verbose: bool = False,
 ) -> Tuple[float, int]:
     """Train LoRA parameters locally."""
 
     model.to(device)
     model.train()
-    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    if verbose:
+        trainable_names = [n for n, p in model.named_parameters() if p.requires_grad]
+        print(f"[Train] trainable params: {len(trainable_params)} -> {trainable_names}")
+
+    optimizer = torch.optim.AdamW(trainable_params, lr=lr)
     total = len(dataloader.dataset)
     global_step = 0
     total_loss = 0.0
@@ -63,4 +69,3 @@ def evaluate(model, dataloader: DataLoader, device) -> Dict[str, float]:
     avg_loss = loss_sum / max(len(dataloader), 1)
     acc = correct / max(total, 1)
     return {"loss": avg_loss, "accuracy": acc}
-

@@ -108,7 +108,12 @@ class FedSAFoldClient(fl.client.NumPyClient):
             a_before, _ = split_lora_params(state_before)
 
             loss, num_examples = train_one_round(
-                self.model, self.dataloader, self.device, lr=self.cfg.train.lr, epochs=self.cfg.train.local_epochs
+                self.model,
+                self.dataloader,
+                self.device,
+                lr=self.cfg.train.lr,
+                epochs=self.cfg.train.local_epochs,
+                verbose=True,
             )
 
             state_after = self.model.state_dict()
