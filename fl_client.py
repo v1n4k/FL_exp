@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 
 from config import ExperimentCfg
 from lora_utils import lora_a_to_b_name, split_lora_params
-from train_loop import clone_state_dict, train_one_round
+from train_loop import clone_state_dict, train_one_round, evaluate
 
 
 class FedSAFoldClient(fl.client.NumPyClient):
@@ -20,6 +20,7 @@ class FedSAFoldClient(fl.client.NumPyClient):
         self,
         cid: str,
         dataloader: DataLoader,
+        eval_loader: DataLoader | None,
         model_builder,
         cfg: ExperimentCfg,
         param_names: List[str],
@@ -27,6 +28,7 @@ class FedSAFoldClient(fl.client.NumPyClient):
     ):
         self.cid = cid
         self.dataloader = dataloader
+        self.eval_loader = eval_loader or dataloader
         self.cfg = cfg
         chosen_device = device_override or cfg.train.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(chosen_device)
@@ -114,6 +116,9 @@ class FedSAFoldClient(fl.client.NumPyClient):
                 lr=self.cfg.train.lr,
                 epochs=self.cfg.train.local_epochs,
                 verbose=True,
+                optimizer_name=self.cfg.train.optimizer,
+                momentum=self.cfg.train.momentum,
+                weight_decay=self.cfg.train.weight_decay,
             )
 
             state_after = self.model.state_dict()
@@ -150,5 +155,8 @@ class FedSAFoldClient(fl.client.NumPyClient):
             raise
 
     def evaluate(self, parameters: List[np.ndarray], config: Dict[str, Any]):
-        # For brevity, skip client-side evaluation in this prototype
-        return 0.0, len(self.dataloader.dataset), {"accuracy": 0.0}
+        # apply global params and T, then evaluate personalized model
+        self.set_parameters(parameters)
+        self._apply_T_to_B(config)
+        metrics = evaluate(self.model, self.eval_loader, self.device)
+        return metrics["loss"], len(self.eval_loader.dataset), {"accuracy": metrics["accuracy"]}

@@ -41,6 +41,10 @@ def parse_args() -> ExperimentCfg:
     parser.add_argument("--wandb-project", type=str, default="fedsa-fold")
     parser.add_argument("--init-noise-std", type=float, default=0.0)
     parser.add_argument("--gpus-per-client", type=float, default=1.0)
+    parser.add_argument("--optimizer", type=str, default="sgd")
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
+    parser.add_argument("--early-stop-patience", type=int, default=3)
     args = parser.parse_args()
 
     cfg = ExperimentCfg()
@@ -52,6 +56,10 @@ def parse_args() -> ExperimentCfg:
     cfg.train.lr = args.lr
     cfg.train.init_noise_std = args.init_noise_std
     cfg.train.gpus_per_client = args.gpus_per_client
+    cfg.train.optimizer = args.optimizer
+    cfg.train.momentum = args.momentum
+    cfg.train.weight_decay = args.weight_decay
+    cfg.train.early_stop_patience = args.early_stop_patience
     cfg.data.dirichlet_alpha = args.alpha
     cfg.data.max_length = args.max_length
     cfg.extra["use_wandb"] = str(args.use_wandb)
@@ -63,11 +71,11 @@ def main():
     cfg = parse_args()
     set_seed(cfg.seed)
 
-    client_loaders, val_loader, holdout_loader, test_loader, tokenizer, num_labels = prepare_dataloaders(cfg)
+    client_train_loaders, client_val_loaders, val_loader, holdout_loader, test_loader, tokenizer, num_labels = prepare_dataloaders(cfg)
     gpu_count = torch.cuda.device_count()
     # Diagnostics: print client dataset sizes
-    for cid, loader in client_loaders.items():
-        print(f"[Data] client {cid} size: {len(loader.dataset)}")
+    for cid, loader in client_train_loaders.items():
+        print(f"[Data] client {cid} train size: {len(loader.dataset)}; val size: {len(client_val_loaders[cid].dataset)}")
 
     # Build a template model for parameter ordering/state
     _, template_state, param_names = build_model(cfg, num_labels)
@@ -121,9 +129,10 @@ def main():
 
     def client_fn(cid: str):
         cid_int = int(cid)
-        loader = client_loaders[cid_int]
+        loader = client_train_loaders[cid_int]
+        eval_loader = client_val_loaders[cid_int]
         # Let Ray/Flower assign GPUs via client_resources; avoid manual overrides.
-        return FedSAFoldClient(cid, loader, model_builder, cfg, param_names, device_override=None)
+        return FedSAFoldClient(cid, loader, eval_loader, model_builder, cfg, param_names, device_override=None)
 
     server_config = fl.server.ServerConfig(num_rounds=cfg.train.num_rounds)
     client_resources = {"num_cpus": 1, "num_gpus": 0.0}
@@ -145,9 +154,12 @@ def main():
     print("Final holdout metrics:", final_metrics)
     log_fn({"stage": "holdout_final", **final_metrics})
 
-    # Early stopping check: stop if no improvement for 3 rounds
-    if strategy.no_improve_rounds >= 3:
-        print(f"Early stopping triggered after {strategy.no_improve_rounds} stale rounds (best val loss {strategy.best_val_loss})")
+    # Early stopping check based on personalized metric
+    if strategy.no_improve_personalized >= cfg.train.early_stop_patience:
+        print(
+            f"Early stopping triggered after {strategy.no_improve_personalized} stale rounds "
+            f"(best personalized loss {strategy.best_personalized_loss})"
+        )
 
     if wandb_run:
         wandb_run.finish()

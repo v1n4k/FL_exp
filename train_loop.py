@@ -19,6 +19,9 @@ def train_one_round(
     lr: float,
     epochs: int,
     verbose: bool = False,
+    optimizer_name: str = "sgd",
+    momentum: float = 0.9,
+    weight_decay: float = 0.0,
 ) -> Tuple[float, int]:
     """Train LoRA parameters locally."""
 
@@ -26,11 +29,12 @@ def train_one_round(
     model.train()
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if verbose:
-        trainable_names = [n for n, p in model.named_parameters() if p.requires_grad]
         print(f"[Train] trainable params: {len(trainable_params)}")
-        print("[Train] names:", trainable_names)
 
-    optimizer = torch.optim.AdamW(trainable_params, lr=lr)
+    if optimizer_name.lower() == "sgd":
+        optimizer = torch.optim.SGD(trainable_params, lr=lr, momentum=momentum, weight_decay=weight_decay)
+    else:
+        optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=weight_decay)
     total_steps = epochs * len(dataloader)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,

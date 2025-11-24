@@ -42,6 +42,10 @@ class TrainCfg:
     device: str | None = None
     init_noise_std: float = 0.0
     gpus_per_client: float = 0.0  # set >0 to allocate GPU via Flower/Ray
+    optimizer: str = "sgd"  # "sgd" or "adamw"
+    momentum: float = 0.9
+    weight_decay: float = 0.0
+    early_stop_patience: int = 3  # consecutive non-improve rounds on personalized metric
 
 
 @dataclass

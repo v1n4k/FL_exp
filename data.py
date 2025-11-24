@@ -79,12 +79,23 @@ def build_client_loaders(
     tokenized_train: Dataset,
     client_map: Dict[int, List[int]],
     batch_size: int,
-) -> Dict[int, DataLoader]:
-    loaders: Dict[int, DataLoader] = {}
+    val_frac: float = 0.1,
+) -> Tuple[Dict[int, DataLoader], Dict[int, DataLoader]]:
+    train_loaders: Dict[int, DataLoader] = {}
+    val_loaders: Dict[int, DataLoader] = {}
     for cid, indices in client_map.items():
-        subset = Subset(tokenized_train, indices)
-        loaders[cid] = DataLoader(subset, batch_size=batch_size, shuffle=True)
-    return loaders
+        if not indices:
+            train_loaders[cid] = DataLoader([], batch_size=batch_size, shuffle=True)
+            val_loaders[cid] = DataLoader([], batch_size=batch_size, shuffle=False)
+            continue
+        split = max(1, int(len(indices) * val_frac))
+        val_idx = indices[:split]
+        train_idx = indices[split:] if len(indices) > split else indices
+        train_subset = Subset(tokenized_train, train_idx)
+        val_subset = Subset(tokenized_train, val_idx)
+        train_loaders[cid] = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
+        val_loaders[cid] = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
+    return train_loaders, val_loaders
 
 
 def build_eval_loader(dataset: Dataset, batch_size: int, shuffle: bool = False) -> DataLoader:
@@ -93,15 +104,23 @@ def build_eval_loader(dataset: Dataset, batch_size: int, shuffle: bool = False) 
 
 def prepare_dataloaders(
     cfg: ExperimentCfg,
-) -> Tuple[Dict[int, DataLoader], DataLoader, DataLoader, DataLoader, AutoTokenizer, int]:
+) -> Tuple[
+    Dict[int, DataLoader],
+    Dict[int, DataLoader],
+    DataLoader,
+    DataLoader,
+    DataLoader,
+    AutoTokenizer,
+    int,
+]:
     """Load data, sample a Dirichlet partition, and build loaders."""
 
     tokenized, tokenizer, num_labels = load_and_tokenize(cfg.data, cfg.lora.base_model, seed=cfg.seed)
     client_map = dirichlet_partition(
         tokenized["train"], num_clients=cfg.train.num_clients, alpha=cfg.data.dirichlet_alpha, num_labels=num_labels
     )
-    client_loaders = build_client_loaders(tokenized["train"], client_map, cfg.train.batch_size)
+    client_train_loaders, client_val_loaders = build_client_loaders(tokenized["train"], client_map, cfg.train.batch_size)
     val_loader = build_eval_loader(tokenized["validation"], cfg.train.batch_size)
     holdout_loader = build_eval_loader(tokenized["train_holdout"], cfg.train.batch_size)
     test_loader = build_eval_loader(tokenized["test"], cfg.train.batch_size)
-    return client_loaders, val_loader, holdout_loader, test_loader, tokenizer, num_labels
+    return client_train_loaders, client_val_loaders, val_loader, holdout_loader, test_loader, tokenizer, num_labels
