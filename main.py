@@ -45,6 +45,7 @@ def parse_args() -> ExperimentCfg:
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--early-stop-patience", type=int, default=3)
+    parser.add_argument("--orthogonal-reg-weight", type=float, default=0.0, help="penalty weight for enforcing LoRA A orthonormality")
     args = parser.parse_args()
 
     cfg = ExperimentCfg()
@@ -60,6 +61,7 @@ def parse_args() -> ExperimentCfg:
     cfg.train.momentum = args.momentum
     cfg.train.weight_decay = args.weight_decay
     cfg.train.early_stop_patience = args.early_stop_patience
+    cfg.train.orthogonal_reg_weight = args.orthogonal_reg_weight
     cfg.data.dirichlet_alpha = args.alpha
     cfg.data.max_length = args.max_length
     cfg.extra["use_wandb"] = str(args.use_wandb)
@@ -99,6 +101,7 @@ def main():
                     "batch_size": cfg.train.batch_size,
                     "lr": cfg.train.lr,
                     "alpha": cfg.data.dirichlet_alpha,
+                    "orthogonal_reg_weight": cfg.train.orthogonal_reg_weight,
                 },
             )
         except Exception as exc:

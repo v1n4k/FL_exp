@@ -46,6 +46,7 @@ class TrainCfg:
     momentum: float = 0.9
     weight_decay: float = 0.0
     early_stop_patience: int = 3  # consecutive non-improve rounds on personalized metric
+    orthogonal_reg_weight: float = 0.0  # weight for orthonormality penalty on LoRA A
 
 
 @dataclass

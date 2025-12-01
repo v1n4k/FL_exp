@@ -152,10 +152,10 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
 
             # Build T matrices per client
             A_new_np = self.global_state[name].cpu().numpy()
-            A_pinv = np.linalg.pinv(A_new_np)
+            A_T = A_new_np.T
             for col, cid in enumerate(client_list):
                 S_i = S[:, col].reshape(self.global_state[name].shape)
-                T_i = S_i @ A_pinv
+                T_i = S_i @ A_T
                 b_name = lora_a_to_b_name(name)
                 self.client_T.setdefault(cid, {})[b_name] = T_i
 

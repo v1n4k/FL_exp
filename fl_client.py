@@ -119,6 +119,7 @@ class FedSAFoldClient(fl.client.NumPyClient):
                 optimizer_name=self.cfg.train.optimizer,
                 momentum=self.cfg.train.momentum,
                 weight_decay=self.cfg.train.weight_decay,
+                orthogonal_weight=self.cfg.train.orthogonal_reg_weight,
             )
 
             state_after = self.model.state_dict()
