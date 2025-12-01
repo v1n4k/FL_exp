@@ -116,6 +116,8 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         for name in self.lora_a_names:
             A_global = self.global_state[name].cpu().numpy()
             client_list = list(client_delta_a.keys())
+            if not client_list:
+                continue
             stacked = np.stack(
                 [client_delta_a[cid][name].reshape(-1) for cid in client_list],
                 axis=1,

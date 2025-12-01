@@ -23,6 +23,8 @@ def train_one_round(
     momentum: float = 0.9,
     weight_decay: float = 0.0,
     orthogonal_weight: float = 0.0,
+    orthogonal_warmup_steps: int = 0,
+    grad_clip_norm: float = 0.0,
 ) -> Tuple[float, int]:
     """Train LoRA parameters locally with optional orthogonality regularization on LoRA A."""
 
@@ -54,6 +56,8 @@ def train_one_round(
             loss = outputs.loss
 
             if orthogonal_weight > 0:
+                warmup_steps = max(1, orthogonal_warmup_steps) if orthogonal_warmup_steps > 0 else 1
+                ortho_scale = min(1.0, (global_step + 1) / warmup_steps) if orthogonal_warmup_steps > 0 else 1.0
                 ortho_terms: List[torch.Tensor] = []
                 for name, param in model.named_parameters():
                     if not param.requires_grad or "lora_A" not in name or param.dim() < 2:
@@ -63,9 +67,11 @@ def train_one_round(
                     ortho_terms.append(torch.sum((gram - ident) ** 2))
                 if ortho_terms:
                     ortho_loss = torch.stack(ortho_terms).mean()
-                    loss = loss + orthogonal_weight * ortho_loss
+                    loss = loss + orthogonal_weight * ortho_scale * ortho_loss
 
             loss.backward()
+            if grad_clip_norm and grad_clip_norm > 0:
+                torch.nn.utils.clip_grad_norm_(trainable_params, grad_clip_norm)
             optimizer.step()
             scheduler.step()
             total_loss += loss.item()

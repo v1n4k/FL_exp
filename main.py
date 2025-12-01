@@ -46,6 +46,8 @@ def parse_args() -> ExperimentCfg:
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--early-stop-patience", type=int, default=3)
     parser.add_argument("--orthogonal-reg-weight", type=float, default=0.0, help="penalty weight for enforcing LoRA A orthonormality")
+    parser.add_argument("--orthogonal-warmup-steps", type=int, default=0, help="linear warmup steps for orthogonal penalty (0 disables)")
+    parser.add_argument("--grad-clip-norm", type=float, default=0.0, help="max grad norm for trainable params (0 disables)")
     args = parser.parse_args()
 
     cfg = ExperimentCfg()
@@ -62,6 +64,8 @@ def parse_args() -> ExperimentCfg:
     cfg.train.weight_decay = args.weight_decay
     cfg.train.early_stop_patience = args.early_stop_patience
     cfg.train.orthogonal_reg_weight = args.orthogonal_reg_weight
+    cfg.train.orthogonal_reg_warmup_steps = args.orthogonal_warmup_steps
+    cfg.train.grad_clip_norm = args.grad_clip_norm
     cfg.data.dirichlet_alpha = args.alpha
     cfg.data.max_length = args.max_length
     cfg.extra["use_wandb"] = str(args.use_wandb)
@@ -102,6 +106,8 @@ def main():
                     "lr": cfg.train.lr,
                     "alpha": cfg.data.dirichlet_alpha,
                     "orthogonal_reg_weight": cfg.train.orthogonal_reg_weight,
+                    "orthogonal_reg_warmup_steps": cfg.train.orthogonal_reg_warmup_steps,
+                    "grad_clip_norm": cfg.train.grad_clip_norm,
                 },
             )
         except Exception as exc:

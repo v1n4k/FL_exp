@@ -19,6 +19,8 @@ cd "$(dirname "$0")"
 # WEIGHT_DECAY     : weight decay for optimizer
 # EARLY_STOP       : patience (rounds) for early stopping on personalized metric
 # ORTHO_WEIGHT     : weight for orthogonality regularization on LoRA A (0 disables)
+# ORTHO_WARMUP     : steps to linearly ramp ORTHO_WEIGHT from 0 (0 disables warmup)
+# GRAD_CLIP        : clip norm for trainable params (0 disables)
 # USE_WANDB        : set to 1 to enable Weights & Biases logging
 # WANDB_PROJECT    : wandb project name when USE_WANDB=1
 # GPUS_PER_CLIENT  : number of GPUs to allocate per client (can be fractional)
@@ -39,7 +41,9 @@ OPTIMIZER="sgd"
 MOMENTUM=0.9
 WEIGHT_DECAY=0.0
 EARLY_STOP=3
-ORTHO_WEIGHT=0.1
+ORTHO_WEIGHT=0.01
+ORTHO_WARMUP=200
+GRAD_CLIP=1.0
 # ------------------------
 
 args=(
@@ -58,6 +62,8 @@ args=(
   --weight-decay "$WEIGHT_DECAY"
   --early-stop-patience "$EARLY_STOP"
   --orthogonal-reg-weight "$ORTHO_WEIGHT"
+  --orthogonal-warmup-steps "$ORTHO_WARMUP"
+  --grad-clip-norm "$GRAD_CLIP"
 )
 
 if [[ "$USE_WANDB" -ne 0 ]]; then

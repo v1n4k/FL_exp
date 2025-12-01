@@ -47,6 +47,8 @@ class TrainCfg:
     weight_decay: float = 0.0
     early_stop_patience: int = 3  # consecutive non-improve rounds on personalized metric
     orthogonal_reg_weight: float = 0.0  # weight for orthonormality penalty on LoRA A
+    orthogonal_reg_warmup_steps: int = 0  # linearly ramp orthogonal weight over these steps (0 disables)
+    grad_clip_norm: float = 0.0  # clip norm for trainable params (0 disables)
 
 
 @dataclass

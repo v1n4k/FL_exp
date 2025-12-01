@@ -13,15 +13,20 @@ def _soft_threshold(X: np.ndarray, tau: float) -> np.ndarray:
 def _fallback_rpca(M: np.ndarray, lam: float | None, max_iter: int, tol: float) -> Tuple[np.ndarray, np.ndarray]:
     """Inexact ALM RPCA fallback to avoid dependency issues."""
 
+    M = np.nan_to_num(M, nan=0.0, posinf=0.0, neginf=0.0)
     m, n = M.shape
     lam = lam or 1.0 / np.sqrt(max(m, n))
-    mu = (m * n) / (4.0 * np.linalg.norm(M, 1) + 1e-8)
+    fro_norm = np.linalg.norm(M, ord="fro") + 1e-8
+    mu = (m * n) / (4.0 * fro_norm + 1e-8)
     L = np.zeros_like(M)
     S = np.zeros_like(M)
-    Y = M / max(np.linalg.norm(M, 2), 1e-8)
+    Y = M / fro_norm
 
     for _ in range(max_iter):
-        U, s, Vt = np.linalg.svd(M - S + (1.0 / mu) * Y, full_matrices=False)
+        try:
+            U, s, Vt = np.linalg.svd(M - S + (1.0 / mu) * Y, full_matrices=False)
+        except np.linalg.LinAlgError:
+            return L, S
         s_shrink = _soft_threshold(s, 1.0 / mu)
         rank = (s_shrink > 0).sum()
         if rank == 0:
@@ -49,4 +54,3 @@ def robust_pca(M: np.ndarray, lam: float | None = None, max_iter: int = 100, tol
         return L, S
     except Exception:
         return _fallback_rpca(M, lam=lam, max_iter=max_iter, tol=tol)
-
