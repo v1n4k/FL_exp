@@ -21,20 +21,21 @@ cd "$(dirname "$0")"
 # ORTHO_WEIGHT     : weight for orthogonality regularization on LoRA A (0 disables)
 # ORTHO_WARMUP     : steps to linearly ramp ORTHO_WEIGHT from 0 (0 disables warmup)
 # GRAD_CLIP        : clip norm for trainable params (0 disables)
+# CLIENT_CACHE_DIR : directory to persist per-client B tensors across rounds
 # USE_WANDB        : set to 1 to enable Weights & Biases logging
 # WANDB_PROJECT    : wandb project name when USE_WANDB=1
 # GPUS_PER_CLIENT  : number of GPUs to allocate per client (can be fractional)
 
 NUM_CLIENTS=12
-ROUNDS=20
-LOCAL_EPOCHS=2
+ROUNDS=100
+LOCAL_EPOCHS=10
 BATCH_SIZE=32
-ALPHA=10
+ALPHA=0.3
 LR=3e-2
 MAX_LENGTH=128
 SEED=42
 INIT_NOISE_STD=0.01
-USE_WANDB=1  
+USE_WANDB=1
 WANDB_PROJECT="FL_exp"
 GPUS_PER_CLIENT=0.5
 OPTIMIZER="sgd"
@@ -42,8 +43,9 @@ MOMENTUM=0.9
 WEIGHT_DECAY=0.0
 EARLY_STOP=3
 ORTHO_WEIGHT=0.01
-ORTHO_WARMUP=200
+ORTHO_WARMUP=50
 GRAD_CLIP=1.0
+CLIENT_CACHE_DIR="client_cache"
 # ------------------------
 
 args=(
@@ -64,6 +66,7 @@ args=(
   --orthogonal-reg-weight "$ORTHO_WEIGHT"
   --orthogonal-warmup-steps "$ORTHO_WARMUP"
   --grad-clip-norm "$GRAD_CLIP"
+  --client-cache-dir "$CLIENT_CACHE_DIR"
 )
 
 if [[ "$USE_WANDB" -ne 0 ]]; then

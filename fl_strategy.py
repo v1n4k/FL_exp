@@ -58,6 +58,7 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.no_improve_rounds: int = 0
         self.best_personalized_loss: float | None = None
         self.no_improve_personalized: int = 0
+        self.last_global_metrics: Dict[str, Any] | None = None
 
     # Flower hooks ---------------------------------------------------------
     def initialize_parameters(self, client_manager) -> Parameters:
@@ -152,14 +153,67 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
                     }
                 )
 
+            # Orthogonality diagnostics on updated A
+            if self.log_fn:
+                A_new_np_diag = self.global_state[name].cpu().numpy()
+                gram = A_new_np_diag @ A_new_np_diag.T
+                ident = np.eye(gram.shape[0], dtype=gram.dtype)
+                ortho_dev = float(np.linalg.norm(gram - ident, ord="fro"))
+                try:
+                    sv = np.linalg.svd(A_new_np_diag, compute_uv=False)
+                    sv_min = float(np.min(sv)) if sv.size else 0.0
+                    sv_max = float(np.max(sv)) if sv.size else 0.0
+                except Exception:
+                    sv_min = sv_max = 0.0
+                self.log_fn(
+                    {
+                        "stage": "orthogonality",
+                        "round": server_round,
+                        "name": name,
+                        "gram_dev_fro": ortho_dev,
+                        "sv_min": sv_min,
+                        "sv_max": sv_max,
+                    }
+                )
+
             # Build T matrices per client
             A_new_np = self.global_state[name].cpu().numpy()
             A_T = A_new_np.T
+            t_norms = []
+            t_maxes = []
+            t_ratios = []
             for col, cid in enumerate(client_list):
                 S_i = S[:, col].reshape(self.global_state[name].shape)
                 T_i = S_i @ A_T
+                t_norm = float(np.linalg.norm(T_i))
+                t_max = float(np.max(np.abs(T_i)))
+                s_norm_i = float(np.linalg.norm(S_i)) + 1e-8
+                t_norms.append(t_norm)
+                t_maxes.append(t_max)
+                t_ratios.append(t_norm / s_norm_i)
                 b_name = lora_a_to_b_name(name)
                 self.client_T.setdefault(cid, {})[b_name] = T_i
+
+            if self.log_fn and t_norms:
+                t_norms_np = np.array(t_norms, dtype=np.float32)
+                t_maxes_np = np.array(t_maxes, dtype=np.float32)
+                t_ratios_np = np.array(t_ratios, dtype=np.float32)
+                self.log_fn(
+                    {
+                        "stage": "T_stats",
+                        "round": server_round,
+                        "name": name,
+                        "T_norm_mean": float(np.mean(t_norms_np)),
+                        "T_norm_p95": float(np.percentile(t_norms_np, 95)),
+                        "T_norm_max": float(np.max(t_norms_np)),
+                        "T_absmax_mean": float(np.mean(t_maxes_np)),
+                        "T_absmax_p95": float(np.percentile(t_maxes_np, 95)),
+                        "T_absmax_max": float(np.max(t_maxes_np)),
+                        "T_over_S_mean": float(np.mean(t_ratios_np)),
+                        "T_over_S_p95": float(np.percentile(t_ratios_np, 95)),
+                        "T_over_S_max": float(np.max(t_ratios_np)),
+                    }
+                )
 
         # Aggregate classifier head with simple mean of deltas
         if self.classifier_names:
@@ -209,11 +263,33 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         total_examples = sum(res.num_examples for _, res in results)
         weighted_loss = 0.0
         weighted_acc = 0.0
+        acc_list = []
+        loss_list = []
         for _, res in results:
             w = res.num_examples / total_examples if total_examples > 0 else 1.0 / len(results)
             weighted_loss += w * res.loss
-            weighted_acc += w * res.metrics.get("accuracy", 0.0)
-        metrics = {"personalized_loss": weighted_loss, "personalized_accuracy": weighted_acc, "round": server_round}
+            acc_val = res.metrics.get("accuracy", 0.0)
+            weighted_acc += w * acc_val
+            acc_list.append(acc_val)
+            loss_list.append(res.loss)
+        acc_arr = np.array(acc_list, dtype=np.float32)
+        loss_arr = np.array(loss_list, dtype=np.float32)
+        metrics = {
+            "personalized_loss": weighted_loss,
+            "personalized_accuracy": weighted_acc,
+            "personalized_acc_mean": float(np.mean(acc_arr)),
+            "personalized_acc_p95": float(np.percentile(acc_arr, 95)),
+            "personalized_loss_mean": float(np.mean(loss_arr)),
+            "personalized_loss_p95": float(np.percentile(loss_arr, 95)),
+            "round": server_round,
+        }
+        if self.last_global_metrics and self.last_global_metrics.get("round") == server_round:
+            ga = self.last_global_metrics.get("global_accuracy")
+            gl = self.last_global_metrics.get("global_loss")
+            if ga is not None:
+                metrics["personalization_gain_acc"] = weighted_acc - ga
+            if gl is not None:
+                metrics["personalization_gain_loss"] = weighted_loss - gl
         if self.log_fn:
             self.log_fn({"stage": "personalized_eval", **metrics})
         if self.best_personalized_loss is None or weighted_loss < self.best_personalized_loss - 1e-4:
@@ -230,6 +306,7 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.logged_metrics.append(metrics_with_round)
         if self.log_fn:
             self.log_fn({"stage": "global_val", **metrics_with_round})
+        self.last_global_metrics = {"round": server_round, **metrics}
 
         val_loss = metrics.get("loss")
         if val_loss is not None:
@@ -249,4 +326,6 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         model.load_state_dict(state, strict=False)
         device = torch.device(self.cfg.train.device or ("cuda" if torch.cuda.is_available() else "cpu"))
         metrics = eval_fn(model, dataloader, device)
+        if model_builder is self.model_builder:  # assume this is the regular global eval path
+            self.last_global_metrics = {"round": getattr(parameters, "round", None) or -1, **metrics}
         return metrics

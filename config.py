@@ -49,6 +49,7 @@ class TrainCfg:
     orthogonal_reg_weight: float = 0.0  # weight for orthonormality penalty on LoRA A
     orthogonal_reg_warmup_steps: int = 0  # linearly ramp orthogonal weight over these steps (0 disables)
     grad_clip_norm: float = 0.0  # clip norm for trainable params (0 disables)
+    client_cache_dir: str = "client_cache"  # local persistence for per-client B state (not uploaded)
 
 
 @dataclass

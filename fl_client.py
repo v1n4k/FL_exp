@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 import base64
 import json
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -45,6 +46,21 @@ class FedSAFoldClient(fl.client.NumPyClient):
         # initialize B cache
         _, b_state = split_lora_params(self.model.state_dict())
         self.B_state = {k: v.clone().to(self.device) for k, v in b_state.items()}
+
+        # Optional B persistence across rounds/actors
+        cache_dir = Path(self.cfg.train.client_cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_path = cache_dir / f"client_{self.cid}_B.pt"
+        if self.cache_path.exists():
+            try:
+                cached = torch.load(self.cache_path, map_location=self.device)
+                if isinstance(cached, dict):
+                    for name, tensor in cached.items():
+                        if name in self.B_state and tensor.shape == self.B_state[name].shape:
+                            self.B_state[name] = tensor.to(self.device)
+                print(f"[Client {cid}] restored B from cache")
+            except Exception as exc:
+                print(f"[Client {cid}] failed to load B cache: {exc}")
 
         # Optional small randomization of LoRA params to encourage diversity
         if self.cfg.train.init_noise_std > 0:
@@ -127,6 +143,10 @@ class FedSAFoldClient(fl.client.NumPyClient):
             state_after = self.model.state_dict()
             a_after, b_after = split_lora_params(state_after)
             self.B_state = {k: v.detach().clone() for k, v in b_after.items()}
+            try:
+                torch.save(self.B_state, self.cache_path)
+            except Exception as exc:
+                print(f"[Client {self.cid}] failed to save B cache: {exc}")
 
             # compute deltas for LoRA A and classifier head
             delta_a_payload = [
