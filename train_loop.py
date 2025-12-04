@@ -28,11 +28,21 @@ def train_one_round(
 ) -> Tuple[float, int]:
     """Train LoRA parameters locally with optional orthogonality regularization on LoRA A."""
 
+    def _as_float(value, name: str) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(f"{name} must be numeric, got {value!r}") from exc
+
     model.to(device)
     model.train()
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if verbose:
         print(f"[Train] trainable params: {len(trainable_params)}")
+
+    lr = _as_float(lr, "lr")
+    momentum = _as_float(momentum, "momentum")
+    weight_decay = _as_float(weight_decay, "weight_decay")
 
     if optimizer_name.lower() == "sgd":
         optimizer = torch.optim.SGD(trainable_params, lr=lr, momentum=momentum, weight_decay=weight_decay)
