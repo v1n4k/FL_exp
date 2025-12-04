@@ -1,0 +1,44 @@
+method: fedsa_fold
+seed: 42
+
+lora:
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
+  target_modules: [query, value]
+  base_model: roberta-large
+
+rpca:
+  max_iter: 50
+  tol: 1.0e-6
+  lam: null
+
+data:
+  dataset_name: glue
+  glue_task: qnli
+  max_length: 128
+  dirichlet_alpha: 0.5
+
+train:
+  num_clients: 12
+  num_rounds: 50
+  local_epochs: 10
+  batch_size: 32
+  lr: 3e-2
+  device: null
+  init_noise_std: 0.1
+  gpus_per_client: 0.5
+  optimizer: sgd
+  momentum: 0.9
+  weight_decay: 0.0
+  early_stop_patience: 3
+  orthogonal_reg_weight: 0.0
+  orthogonal_reg_warmup_steps: 0
+  grad_clip_norm: 0.0
+  client_cache_dir: client_cache
+
+extra:
+  use_wandb: "True"
+  wandb_project: fedsa-fold-exp
+  wandb_job_type: fedsa_fold
+  wandb_group: exp_001

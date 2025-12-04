@@ -75,3 +75,34 @@ def ordered_param_names(state_dict: Dict[str, torch.Tensor]) -> List[str]:
 
 def tensors_to_device(tensors: Iterable[torch.Tensor], device) -> List[torch.Tensor]:
     return [t.to(device) for t in tensors]
+
+
+def get_local_param_names(model, param_names: List[str]) -> List[str]:
+    """
+    Auto-detect parameters that should remain local (not aggregated).
+
+    Uses hybrid approach:
+    1. Always includes LoRA B matrices
+    2. Auto-detects trainable non-LoRA parameters (task heads)
+    3. Works across any model architecture (RoBERTa, GPT-2, T5, ViT, etc.)
+
+    Args:
+        model: PyTorch model with PEFT adapters
+        param_names: List of all parameter names in order
+
+    Returns:
+        List of parameter names that should be kept local
+    """
+    local_names = []
+
+    # 1. LoRA B always kept local
+    local_names.extend([n for n in param_names if "lora_B" in n])
+
+    # 2. Task-specific heads: auto-detect trainable non-LoRA parameters
+    # This includes: classifier, score, lm_head, head, etc. (model-agnostic)
+    for name, param in model.named_parameters():
+        if param.requires_grad and "lora_" not in name:
+            if name in param_names:
+                local_names.append(name)
+
+    return local_names

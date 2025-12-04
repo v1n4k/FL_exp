@@ -15,8 +15,9 @@ import os
 from config import ExperimentCfg
 from data import prepare_dataloaders
 from fl_client import FedSAFoldClient
-from fl_strategy import FedSAFoldStrategy
+from fl_strategy import create_strategy
 from model import build_model
+from wandb_logger import WandbLogger
 
 
 def set_seed(seed: int):
@@ -28,50 +29,93 @@ def set_seed(seed: int):
 
 
 def parse_args() -> ExperimentCfg:
-    parser = argparse.ArgumentParser(description="FedSA-Fold simulation")
-    parser.add_argument("--num-clients", type=int, default=5)
-    parser.add_argument("--rounds", type=int, default=3)
-    parser.add_argument("--local-epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--alpha", type=float, default=0.5, help="Dirichlet concentration")
-    parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--max-length", type=int, default=128)
-    parser.add_argument("--seed", type=int, default=42)
+    parser = argparse.ArgumentParser(description="FedSA simulation with method selection")
+
+    # Config file support
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to YAML config file (overrides defaults)")
+    parser.add_argument("--method", type=str, default=None,
+                        help="Method: fedsa_fold or fedsa_lora (overrides config)")
+
+    # Make all existing arguments optional (default=None for CLI override)
+    parser.add_argument("--num-clients", type=int, default=None)
+    parser.add_argument("--rounds", type=int, default=None)
+    parser.add_argument("--local-epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--alpha", type=float, default=None, help="Dirichlet concentration")
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--max-length", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--use-wandb", action="store_true")
-    parser.add_argument("--wandb-project", type=str, default="fedsa-fold")
-    parser.add_argument("--init-noise-std", type=float, default=0.0)
-    parser.add_argument("--gpus-per-client", type=float, default=1.0)
-    parser.add_argument("--optimizer", type=str, default="sgd")
-    parser.add_argument("--momentum", type=float, default=0.9)
-    parser.add_argument("--weight-decay", type=float, default=0.0)
-    parser.add_argument("--early-stop-patience", type=int, default=3)
-    parser.add_argument("--orthogonal-reg-weight", type=float, default=0.0, help="penalty weight for enforcing LoRA A orthonormality")
-    parser.add_argument("--orthogonal-warmup-steps", type=int, default=0, help="linear warmup steps for orthogonal penalty (0 disables)")
-    parser.add_argument("--grad-clip-norm", type=float, default=0.0, help="max grad norm for trainable params (0 disables)")
-    parser.add_argument("--client-cache-dir", type=str, default="client_cache", help="directory to persist per-client B tensors across rounds")
+    parser.add_argument("--wandb-project", type=str, default=None)
+    parser.add_argument("--init-noise-std", type=float, default=None)
+    parser.add_argument("--gpus-per-client", type=float, default=None)
+    parser.add_argument("--optimizer", type=str, default=None)
+    parser.add_argument("--momentum", type=float, default=None)
+    parser.add_argument("--weight-decay", type=float, default=None)
+    parser.add_argument("--early-stop-patience", type=int, default=None)
+    parser.add_argument("--orthogonal-reg-weight", type=float, default=None)
+    parser.add_argument("--orthogonal-warmup-steps", type=int, default=None)
+    parser.add_argument("--grad-clip-norm", type=float, default=None)
+    parser.add_argument("--client-cache-dir", type=str, default=None)
+
     args = parser.parse_args()
 
-    cfg = ExperimentCfg()
-    cfg.seed = args.seed
-    cfg.train.num_clients = args.num_clients
-    cfg.train.num_rounds = args.rounds
-    cfg.train.local_epochs = args.local_epochs
-    cfg.train.batch_size = args.batch_size
-    cfg.train.lr = args.lr
-    cfg.train.init_noise_std = args.init_noise_std
-    cfg.train.gpus_per_client = args.gpus_per_client
-    cfg.train.optimizer = args.optimizer
-    cfg.train.momentum = args.momentum
-    cfg.train.weight_decay = args.weight_decay
-    cfg.train.early_stop_patience = args.early_stop_patience
-    cfg.train.orthogonal_reg_weight = args.orthogonal_reg_weight
-    cfg.train.orthogonal_reg_warmup_steps = args.orthogonal_warmup_steps
-    cfg.train.grad_clip_norm = args.grad_clip_norm
-    cfg.train.client_cache_dir = args.client_cache_dir
-    cfg.data.dirichlet_alpha = args.alpha
-    cfg.data.max_length = args.max_length
-    cfg.extra["use_wandb"] = str(args.use_wandb)
-    cfg.extra["wandb_project"] = args.wandb_project
+    # Load from config file if provided, otherwise use defaults
+    if args.config:
+        cfg = ExperimentCfg.from_yaml(args.config)
+        print(f"[Config] Loaded from {args.config}")
+    else:
+        cfg = ExperimentCfg()
+        print("[Config] Using defaults")
+
+    # Override with CLI arguments (CLI takes precedence)
+    if args.method is not None:
+        cfg.train.method = args.method
+    if args.seed is not None:
+        cfg.seed = args.seed
+    if args.num_clients is not None:
+        cfg.train.num_clients = args.num_clients
+    if args.rounds is not None:
+        cfg.train.num_rounds = args.rounds
+    if args.local_epochs is not None:
+        cfg.train.local_epochs = args.local_epochs
+    if args.batch_size is not None:
+        cfg.train.batch_size = args.batch_size
+    if args.lr is not None:
+        cfg.train.lr = args.lr
+    if args.init_noise_std is not None:
+        cfg.train.init_noise_std = args.init_noise_std
+    if args.gpus_per_client is not None:
+        cfg.train.gpus_per_client = args.gpus_per_client
+    if args.optimizer is not None:
+        cfg.train.optimizer = args.optimizer
+    if args.momentum is not None:
+        cfg.train.momentum = args.momentum
+    if args.weight_decay is not None:
+        cfg.train.weight_decay = args.weight_decay
+    if args.early_stop_patience is not None:
+        cfg.train.early_stop_patience = args.early_stop_patience
+    if args.orthogonal_reg_weight is not None:
+        cfg.train.orthogonal_reg_weight = args.orthogonal_reg_weight
+    if args.orthogonal_warmup_steps is not None:
+        cfg.train.orthogonal_reg_warmup_steps = args.orthogonal_warmup_steps
+    if args.grad_clip_norm is not None:
+        cfg.train.grad_clip_norm = args.grad_clip_norm
+    if args.client_cache_dir is not None:
+        cfg.train.client_cache_dir = args.client_cache_dir
+    if args.alpha is not None:
+        cfg.data.dirichlet_alpha = args.alpha
+    if args.max_length is not None:
+        cfg.data.max_length = args.max_length
+
+    # Special handling for wandb args
+    if args.use_wandb:
+        cfg.extra["use_wandb"] = "True"
+    if args.wandb_project is not None:
+        cfg.extra["wandb_project"] = args.wandb_project
+
+    print(f"[Config] Method: {cfg.train.method}")
     return cfg
 
 
@@ -94,28 +138,26 @@ def main():
 
     use_wandb = cfg.extra.get("use_wandb", "False") == "True"
     wandb_run = None
+    wandb_logger = None
+
     if use_wandb:
         try:
             import wandb
 
+            # Log full config (not just subset)
             wandb_run = wandb.init(
-                project=cfg.extra.get("wandb_project", "fedsa-fold"),
-                config={
-                    "num_clients": cfg.train.num_clients,
-                    "rounds": cfg.train.num_rounds,
-                    "local_epochs": cfg.train.local_epochs,
-                    "batch_size": cfg.train.batch_size,
-                    "lr": cfg.train.lr,
-                    "alpha": cfg.data.dirichlet_alpha,
-                    "orthogonal_reg_weight": cfg.train.orthogonal_reg_weight,
-                    "orthogonal_reg_warmup_steps": cfg.train.orthogonal_reg_warmup_steps,
-                    "grad_clip_norm": cfg.train.grad_clip_norm,
-                    "client_cache_dir": cfg.train.client_cache_dir,
-                },
+                project=cfg.extra.get("wandb_project", "fedsa-exp"),
+                group=cfg.extra.get("wandb_group", None),
+                job_type=cfg.extra.get("wandb_job_type", cfg.train.method),
+                config=cfg.to_dict(),  # Log ENTIRE config
+                tags=[cfg.train.method, f"clients_{cfg.train.num_clients}"],
             )
+            wandb_logger = WandbLogger(wandb_run, method=cfg.train.method)
+            print("[Wandb] Initialized with full config logging")
         except Exception as exc:
-            print("wandb init failed, continuing without logging:", exc)
+            print(f"[Wandb] Init failed, continuing without logging: {exc}")
             wandb_run = None
+            wandb_logger = None
 
     metrics_path = Path("fedsa_fold_metrics.jsonl")
 
@@ -123,21 +165,28 @@ def main():
         print(record)
         with metrics_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
-        if wandb_run:
+
+        # Use enhanced wandb logger if available
+        if wandb_logger:
+            wandb_logger.log(record)
+        elif wandb_run:  # fallback to direct logging
             try:
                 wandb_run.log(record)
-            except Exception as exc:  # keep training going
-                print("wandb log failed:", exc)
+            except Exception as exc:
+                print(f"[Wandb] Log failed: {exc}")
 
-    strategy = FedSAFoldStrategy(
-        cfg,
-        param_names,
-        template_state,
+    strategy = create_strategy(
+        method=cfg.train.method,
+        cfg=cfg,
+        param_names=param_names,
+        template_state=template_state,
         num_clients=cfg.train.num_clients,
         eval_loader=val_loader,
         model_builder=model_builder,
         log_fn=log_fn,
+        wandb_logger=wandb_logger,
     )
+    print(f"[Strategy] Using {cfg.train.method} strategy")
 
     def client_fn(cid: str):
         cid_int = int(cid)

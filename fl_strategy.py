@@ -41,6 +41,7 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         eval_loader,
         model_builder,
         log_fn: Optional[Callable[[Dict[str, Any]], None]] = None,
+        wandb_logger: Optional[Any] = None,
     ):
         self.cfg = cfg
         self.param_names = param_names
@@ -50,10 +51,11 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.model_builder = model_builder
         self.client_T: Dict[str, Dict[str, np.ndarray]] = {}
         self.lora_a_names = [n for n in param_names if "lora_A" in n]
-        self.classifier_names = [n for n in param_names if "classifier" in n]
+        # NOTE: No task head tracking on server - task heads remain personalized on clients
         self.parameters = ndarrays_to_parameters(state_dict_to_ndarrays(self.global_state, self.param_names))
         self.logged_metrics: List[Dict[str, Any]] = []
         self.log_fn = log_fn
+        self.wandb_logger = wandb_logger
         self.best_val_loss: float | None = None
         self.no_improve_rounds: int = 0
         self.best_personalized_loss: float | None = None
@@ -99,18 +101,14 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         if not results:
             return self.parameters, {}
 
-        # Collect delta A and classifier deltas per client
+        # Collect delta A only (task heads remain local on clients)
         client_delta_a: Dict[str, Dict[str, np.ndarray]] = {}
-        client_delta_cls: Dict[str, Dict[str, np.ndarray]] = {}
         client_weights: Dict[str, int] = {}
         for client, fit_res in results:
             cid = getattr(client, "cid", "unknown")
             arrays = parameters_to_ndarrays(fit_res.parameters)
-            split = len(self.lora_a_names)
-            arr_a = arrays[:split]
-            arr_cls = arrays[split:]
-            client_delta_a[cid] = {name: arr for name, arr in zip(self.lora_a_names, arr_a)}
-            client_delta_cls[cid] = {name: arr for name, arr in zip(self.classifier_names, arr_cls)}
+            # IMPORTANT: Now only receiving LoRA A deltas (no task head)
+            client_delta_a[cid] = {name: arr for name, arr in zip(self.lora_a_names, arrays)}
             client_weights[cid] = fit_res.num_examples
 
         # Aggregate each LoRA A with RPCA
@@ -153,6 +151,12 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
                     }
                 )
 
+            # Enhanced wandb logging for RPCA
+            if self.wandb_logger:
+                self.wandb_logger.log_rpca_metrics(
+                    round=server_round, name=name, L=L, S=S, L_mean=L_mean
+                )
+
             # Orthogonality diagnostics on updated A
             if self.log_fn:
                 A_new_np_diag = self.global_state[name].cpu().numpy()
@@ -174,6 +178,13 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
                         "sv_min": sv_min,
                         "sv_max": sv_max,
                     }
+                )
+
+            # Enhanced wandb logging for orthogonality
+            if self.wandb_logger:
+                A_new_np_diag = self.global_state[name].cpu().numpy()
+                self.wandb_logger.log_orthogonality_metrics(
+                    round=server_round, name=name, A=A_new_np_diag
                 )
 
             # Build T matrices per client
@@ -215,18 +226,18 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
                     }
                 )
 
-        # Aggregate classifier head with simple mean of deltas
-        if self.classifier_names:
-            for name in self.classifier_names:
-                deltas = [client_delta_cls[cid][name] for cid in client_delta_cls if name in client_delta_cls[cid]]
-                weights_cls = [client_weights[cid] for cid in client_delta_cls if name in client_delta_cls[cid]]
-                if not deltas:
-                    continue
-                weight_sum = np.sum(weights_cls) if np.sum(weights_cls) > 0 else len(weights_cls)
-                mean_delta = sum(w * d for w, d in zip(weights_cls, deltas)) / weight_sum
-                self.global_state[name] = torch.tensor(
-                    self.global_state[name].cpu().numpy() + mean_delta, dtype=self.global_state[name].dtype
+            # Enhanced wandb logging for T-matrix stats
+            if self.wandb_logger and t_norms:
+                self.wandb_logger.log_tmatrix_stats(
+                    round=server_round,
+                    name=name,
+                    t_norms=t_norms,
+                    t_maxes=t_maxes,
+                    t_ratios=t_ratios
                 )
+
+        # Task head aggregation removed - task heads remain local on each client
+        # Global state only tracks LoRA A parameters (aggregated with RPCA above)
 
         # Update stored parameters for the next round
         ndarrays = state_dict_to_ndarrays(self.global_state, self.param_names)
@@ -292,6 +303,19 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
                 metrics["personalization_gain_loss"] = weighted_loss - gl
         if self.log_fn:
             self.log_fn({"stage": "personalized_eval", **metrics})
+
+        # Enhanced wandb logging for personalized eval
+        if self.wandb_logger:
+            self.wandb_logger.log_personalized_eval(
+                round=server_round,
+                weighted_loss=weighted_loss,
+                weighted_acc=weighted_acc,
+                acc_list=acc_list,
+                loss_list=loss_list,
+                personalization_gain_acc=metrics.get("personalization_gain_acc"),
+                personalization_gain_loss=metrics.get("personalization_gain_loss")
+            )
+
         if self.best_personalized_loss is None or weighted_loss < self.best_personalized_loss - 1e-4:
             self.best_personalized_loss = weighted_loss
             self.no_improve_personalized = 0
@@ -306,6 +330,15 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         self.logged_metrics.append(metrics_with_round)
         if self.log_fn:
             self.log_fn({"stage": "global_val", **metrics_with_round})
+
+        # Enhanced wandb logging for global eval
+        if self.wandb_logger:
+            self.wandb_logger.log_global_eval(
+                round=server_round,
+                loss=metrics.get("loss"),
+                accuracy=metrics.get("accuracy")
+            )
+
         self.last_global_metrics = {"round": server_round, **metrics}
 
         val_loss = metrics.get("loss")
@@ -329,3 +362,321 @@ class FedSAFoldStrategy(fl.server.strategy.Strategy):
         if model_builder is self.model_builder:  # assume this is the regular global eval path
             self.last_global_metrics = {"round": getattr(parameters, "round", None) or -1, **metrics}
         return metrics
+
+
+class FedSALoRAStrategy(fl.server.strategy.Strategy):
+    """
+    Simple FedAvg-style LoRA aggregation baseline.
+
+    Key differences from FedSAFoldStrategy:
+    - NO RPCA decomposition
+    - NO T-matrix calculation/distribution
+    - Simple weighted average of LoRA A updates
+    - B matrices and task heads remain local (same as FedSAFold)
+
+    This serves as a baseline to measure the value added by RPCA+folding.
+    """
+
+    def __init__(
+        self,
+        cfg: ExperimentCfg,
+        param_names: List[str],
+        template_state: Dict[str, torch.Tensor],
+        num_clients: int,
+        eval_loader,
+        model_builder,
+        log_fn: Optional[Callable[[Dict[str, Any]], None]] = None,
+        wandb_logger: Optional[Any] = None,
+    ):
+        self.cfg = cfg
+        self.param_names = param_names
+        self.global_state = {k: v.clone() for k, v in template_state.items()}
+        self.num_clients = num_clients
+        self.eval_loader = eval_loader
+        self.model_builder = model_builder
+        self.lora_a_names = [n for n in param_names if "lora_A" in n]
+        self.parameters = ndarrays_to_parameters(
+            state_dict_to_ndarrays(self.global_state, self.param_names)
+        )
+        self.logged_metrics: List[Dict[str, Any]] = []
+        self.log_fn = log_fn
+        self.wandb_logger = wandb_logger
+        self.best_val_loss: float | None = None
+        self.no_improve_rounds: int = 0
+        self.best_personalized_loss: float | None = None
+        self.no_improve_personalized: int = 0
+        self.last_global_metrics: Dict[str, Any] | None = None
+
+    def initialize_parameters(self, client_manager) -> Parameters:
+        return self.parameters
+
+    def configure_fit(
+        self, server_round: int, parameters: Parameters, client_manager
+    ) -> List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.FitIns]]:
+        # Simple FedAvg: no T-matrix, just send global params
+        sample_size = self.num_clients
+        clients = client_manager.sample(
+            num_clients=sample_size, min_num_clients=sample_size
+        )
+        instructions = [
+            fl.common.FitIns(parameters=parameters, config={})
+            for _ in clients
+        ]
+        return list(zip(clients, instructions))
+
+    def aggregate_fit(
+        self,
+        server_round: int,
+        results: List[Tuple[fl.server.client_proxy.ClientProxy, FitRes]],
+        failures: List[Any],
+    ) -> Tuple[Parameters, Dict[str, Any]]:
+        if failures:
+            print(f"[Server] aggregate_fit saw {len(failures)} failures")
+
+        if not results:
+            return self.parameters, {}
+
+        # Collect delta A and weights
+        client_delta_a: Dict[str, Dict[str, np.ndarray]] = {}
+        client_weights: Dict[str, int] = {}
+
+        for client, fit_res in results:
+            cid = getattr(client, "cid", "unknown")
+            arrays = parameters_to_ndarrays(fit_res.parameters)
+            client_delta_a[cid] = {
+                name: arr for name, arr in zip(self.lora_a_names, arrays)
+            }
+            client_weights[cid] = fit_res.num_examples
+
+        # Simple weighted average for each LoRA A parameter
+        client_list = list(client_delta_a.keys())
+        weights = np.array([client_weights[cid] for cid in client_list], dtype=np.float32)
+        weight_sum = np.sum(weights) if np.sum(weights) > 0 else len(client_list)
+
+        for name in self.lora_a_names:
+            A_global = self.global_state[name].cpu().numpy()
+
+            # Weighted average of deltas
+            delta_avg = sum(
+                w * client_delta_a[cid][name]
+                for w, cid in zip(weights, client_list)
+            ) / weight_sum
+
+            # Update global A
+            self.global_state[name] = torch.tensor(
+                A_global + delta_avg, dtype=self.global_state[name].dtype
+            )
+
+            # Log aggregation metrics (simpler than RPCA)
+            if self.log_fn:
+                delta_norm = float(np.linalg.norm(delta_avg))
+                delta_variance = float(np.var([
+                    np.linalg.norm(client_delta_a[cid][name])
+                    for cid in client_list
+                ]))
+                self.log_fn({
+                    "stage": "aggregation",
+                    "round": server_round,
+                    "name": name,
+                    "delta_norm": delta_norm,
+                    "delta_variance": delta_variance,
+                })
+
+            # Enhanced wandb logging
+            if self.wandb_logger:
+                delta_norm = float(np.linalg.norm(delta_avg))
+                delta_variance = float(np.var([
+                    np.linalg.norm(client_delta_a[cid][name])
+                    for cid in client_list
+                ]))
+                self.wandb_logger.log_aggregation_metrics(
+                    round=server_round,
+                    name=name,
+                    delta_norm=delta_norm,
+                    delta_variance=delta_variance
+                )
+
+        # Update stored parameters
+        ndarrays = state_dict_to_ndarrays(self.global_state, self.param_names)
+        self.parameters = ndarrays_to_parameters(ndarrays)
+
+        return self.parameters, {"server_round": server_round}
+
+    def configure_evaluate(
+        self, server_round: int, parameters: Parameters, client_manager
+    ) -> List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.EvaluateIns]]:
+        # No T-matrix to send
+        clients = client_manager.sample(
+            num_clients=self.num_clients, min_num_clients=self.num_clients
+        )
+        instructions = [
+            fl.common.EvaluateIns(parameters=parameters, config={})
+            for _ in clients
+        ]
+        return list(zip(clients, instructions))
+
+    def aggregate_evaluate(
+        self,
+        server_round: int,
+        results: List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.EvaluateRes]],
+        failures: List[Any],
+    ) -> Tuple[float, Dict[str, Any]]:
+        # Same aggregation logic as FedSAFoldStrategy
+        if not results:
+            return 0.0, {}
+
+        total_examples = sum(res.num_examples for _, res in results)
+        weighted_loss = 0.0
+        weighted_acc = 0.0
+        acc_list = []
+        loss_list = []
+
+        for _, res in results:
+            w = res.num_examples / total_examples if total_examples > 0 else 1.0 / len(results)
+            weighted_loss += w * res.loss
+            acc_val = res.metrics.get("accuracy", 0.0)
+            weighted_acc += w * acc_val
+            acc_list.append(acc_val)
+            loss_list.append(res.loss)
+
+        acc_arr = np.array(acc_list, dtype=np.float32)
+        loss_arr = np.array(loss_list, dtype=np.float32)
+
+        metrics = {
+            "personalized_loss": weighted_loss,
+            "personalized_accuracy": weighted_acc,
+            "personalized_acc_mean": float(np.mean(acc_arr)),
+            "personalized_acc_p95": float(np.percentile(acc_arr, 95)),
+            "personalized_loss_mean": float(np.mean(loss_arr)),
+            "personalized_loss_p95": float(np.percentile(loss_arr, 95)),
+            "round": server_round,
+        }
+
+        # Compute personalization gain if global metrics available
+        if self.last_global_metrics and self.last_global_metrics.get("round") == server_round:
+            ga = self.last_global_metrics.get("global_accuracy")
+            gl = self.last_global_metrics.get("global_loss")
+            if ga is not None:
+                metrics["personalization_gain_acc"] = weighted_acc - ga
+            if gl is not None:
+                metrics["personalization_gain_loss"] = weighted_loss - gl
+
+        if self.log_fn:
+            self.log_fn({"stage": "personalized_eval", **metrics})
+
+        # Enhanced wandb logging
+        if self.wandb_logger:
+            self.wandb_logger.log_personalized_eval(
+                round=server_round,
+                weighted_loss=weighted_loss,
+                weighted_acc=weighted_acc,
+                acc_list=acc_list,
+                loss_list=loss_list,
+                personalization_gain_acc=metrics.get("personalization_gain_acc"),
+                personalization_gain_loss=metrics.get("personalization_gain_loss")
+            )
+
+        # Early stopping check
+        if self.best_personalized_loss is None or weighted_loss < self.best_personalized_loss - 1e-4:
+            self.best_personalized_loss = weighted_loss
+            self.no_improve_personalized = 0
+        else:
+            self.no_improve_personalized += 1
+
+        return weighted_loss, metrics
+
+    def evaluate(self, server_round: int, parameters: Parameters):
+        # Global evaluation (same as FedSAFoldStrategy)
+        metrics = self.evaluate_global(
+            self.eval_loader, self.model_builder, parameters=parameters
+        )
+        metrics_with_round = {
+            "round": server_round,
+            "global_loss": metrics.get("loss"),
+            "global_accuracy": metrics.get("accuracy")
+        }
+        self.logged_metrics.append(metrics_with_round)
+
+        if self.log_fn:
+            self.log_fn({"stage": "global_val", **metrics_with_round})
+
+        # Enhanced wandb logging
+        if self.wandb_logger:
+            self.wandb_logger.log_global_eval(
+                round=server_round,
+                loss=metrics.get("loss"),
+                accuracy=metrics.get("accuracy")
+            )
+
+        self.last_global_metrics = {"round": server_round, **metrics}
+
+        # Track best val loss
+        val_loss = metrics.get("loss")
+        if val_loss is not None:
+            if self.best_val_loss is None or val_loss < self.best_val_loss - 1e-4:
+                self.best_val_loss = val_loss
+                self.no_improve_rounds = 0
+            else:
+                self.no_improve_rounds += 1
+
+        return 0.0, metrics
+
+    def evaluate_global(
+        self, dataloader, model_builder=None, parameters: Parameters | None = None
+    ) -> Dict[str, float]:
+        # Same implementation as FedSAFoldStrategy
+        arrays = parameters_to_ndarrays(parameters) if parameters is not None \
+                 else state_dict_to_ndarrays(self.global_state, self.param_names)
+        state = ndarrays_to_state_dict(self.param_names, arrays, self.global_state)
+        builder = model_builder or self.model_builder
+        model, _, _ = builder()
+        model.load_state_dict(state, strict=False)
+        device = torch.device(
+            self.cfg.train.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        metrics = eval_fn(model, dataloader, device)
+
+        if model_builder is self.model_builder:
+            self.last_global_metrics = {"round": getattr(parameters, "round", None) or -1, **metrics}
+
+        return metrics
+
+
+def create_strategy(
+    method: str,
+    cfg: ExperimentCfg,
+    param_names: List[str],
+    template_state: Dict[str, torch.Tensor],
+    num_clients: int,
+    eval_loader,
+    model_builder,
+    log_fn: Optional[Callable[[Dict[str, Any]], None]] = None,
+    wandb_logger: Optional[Any] = None,
+) -> fl.server.strategy.Strategy:
+    """
+    Factory function to create strategy based on method name.
+
+    Supported methods:
+    - "fedsa_fold": RPCA + T-matrix aggregation
+    - "fedsa_lora": Simple weighted averaging baseline
+
+    Raises ValueError if method not recognized.
+    """
+    method = method.lower().strip()
+
+    if method == "fedsa_fold":
+        return FedSAFoldStrategy(
+            cfg, param_names, template_state,
+            num_clients, eval_loader, model_builder,
+            log_fn, wandb_logger
+        )
+    elif method == "fedsa_lora":
+        return FedSALoRAStrategy(
+            cfg, param_names, template_state,
+            num_clients, eval_loader, model_builder,
+            log_fn, wandb_logger
+        )
+    else:
+        raise ValueError(
+            f"Unknown method: {method}. Supported: ['fedsa_fold', 'fedsa_lora']"
+        )

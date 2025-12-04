@@ -1,8 +1,10 @@
 """Configuration structures for the FedSA-Fold simulation."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Dict, List
+from pathlib import Path
+import yaml
 
 
 @dataclass
@@ -60,3 +62,34 @@ class ExperimentCfg:
     data: DataCfg = field(default_factory=DataCfg)
     train: TrainCfg = field(default_factory=TrainCfg)
     extra: Dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_yaml(cls, yaml_path: str | Path) -> ExperimentCfg:
+        """Load config from YAML file."""
+        with open(yaml_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        lora_cfg = LoraCfg(**data.get('lora', {}))
+        rpca_cfg = RPCACfg(**data.get('rpca', {}))
+        data_cfg = DataCfg(**data.get('data', {}))
+        train_cfg = TrainCfg(**data.get('train', {}))
+
+        return cls(
+            seed=data.get('seed', 42),
+            lora=lora_cfg,
+            rpca=rpca_cfg,
+            data=data_cfg,
+            train=train_cfg,
+            extra=data.get('extra', {})
+        )
+
+    def to_dict(self) -> Dict:
+        """Convert config to dictionary for wandb logging."""
+        return {
+            'seed': self.seed,
+            'lora': asdict(self.lora),
+            'rpca': asdict(self.rpca),
+            'data': asdict(self.data),
+            'train': asdict(self.train),
+            'extra': self.extra
+        }

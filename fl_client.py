@@ -12,7 +12,7 @@ import flwr as fl
 from torch.utils.data import DataLoader
 
 from config import ExperimentCfg
-from lora_utils import lora_a_to_b_name, split_lora_params
+from lora_utils import lora_a_to_b_name, split_lora_params, get_local_param_names
 from train_loop import clone_state_dict, train_one_round, evaluate
 
 
@@ -41,11 +41,24 @@ class FedSAFoldClient(fl.client.NumPyClient):
         # ordering
         self.param_names = param_names
         self.lora_a_names = [n for n in param_names if "lora_A" in n]
-        self.classifier_names = [n for n in param_names if "classifier" in n]
+
+        # Auto-detect local parameters (LoRA B + task head) - works across all models
+        local_param_names = get_local_param_names(self.model, param_names)
+        self.lora_b_names = [n for n in local_param_names if "lora_B" in n]
+        self.task_head_names = [n for n in local_param_names if "lora_B" not in n]
+
+        print(f"[Client {cid}] Detected {len(self.task_head_names)} task head params: {self.task_head_names}")
 
         # initialize B cache
         _, b_state = split_lora_params(self.model.state_dict())
         self.B_state = {k: v.clone().to(self.device) for k, v in b_state.items()}
+
+        # Initialize task head cache (task-agnostic: classifier, lm_head, score, head, etc.)
+        task_head_state = {
+            n: self.model.state_dict()[n].clone().to(self.device)
+            for n in self.task_head_names
+        }
+        self.task_head_state = task_head_state
 
         # Optional B persistence across rounds/actors
         cache_dir = Path(self.cfg.train.client_cache_dir)
@@ -61,6 +74,19 @@ class FedSAFoldClient(fl.client.NumPyClient):
                 print(f"[Client {cid}] restored B from cache")
             except Exception as exc:
                 print(f"[Client {cid}] failed to load B cache: {exc}")
+
+        # Restore task head from disk cache (model-agnostic: works for any task head)
+        self.task_head_cache_path = cache_dir / f"client_{self.cid}_task_head.pt"
+        if self.task_head_cache_path.exists():
+            try:
+                cached_head = torch.load(self.task_head_cache_path, map_location=self.device)
+                if isinstance(cached_head, dict):
+                    for name, tensor in cached_head.items():
+                        if name in self.task_head_state and tensor.shape == self.task_head_state[name].shape:
+                            self.task_head_state[name] = tensor.to(self.device)
+                print(f"[Client {cid}] restored task head ({len(cached_head)} params) from cache")
+            except Exception as exc:
+                print(f"[Client {cid}] failed to load task head cache: {exc}")
 
         # Optional small randomization of LoRA params to encourage diversity
         if self.cfg.train.init_noise_std > 0:
@@ -82,8 +108,13 @@ class FedSAFoldClient(fl.client.NumPyClient):
             if name in state:
                 state[name] = tensor.to(self.device)
 
+        # keep local task head (restore from cache before applying server params)
+        for name, tensor in self.task_head_state.items():
+            if name in state:
+                state[name] = tensor.to(self.device)
+
         for name, array in zip(self.param_names, parameters):
-            if "lora_B" in name:
+            if "lora_B" in name or name in self.task_head_names:  # Skip local params
                 continue
             if name in state:
                 state[name] = torch.tensor(array, device=self.device)
@@ -148,28 +179,36 @@ class FedSAFoldClient(fl.client.NumPyClient):
             except Exception as exc:
                 print(f"[Client {self.cid}] failed to save B cache: {exc}")
 
-            # compute deltas for LoRA A and classifier head
+            # Save updated task head to disk (persistent across client recreations)
+            self.task_head_state = {
+                n: state_after[n].detach().clone() for n in self.task_head_names
+            }
+            try:
+                torch.save(self.task_head_state, self.task_head_cache_path)
+            except Exception as exc:
+                print(f"[Client {self.cid}] failed to save task head cache: {exc}")
+
+            # compute deltas for LoRA A only (task head kept local)
             delta_a_payload = [
                 (a_after[name] - a_before[name]).detach().cpu().numpy() for name in self.lora_a_names
-            ]
-            delta_classifier = [
-                (state_after[name] - state_before[name]).detach().cpu().numpy() for name in self.classifier_names
             ]
 
             # diagnostics
             delta_a_norm = sum(
                 float(torch.sum((a_after[n] - a_before[n]) ** 2).sqrt().cpu()) for n in self.lora_a_names if n in a_after
             )
-            delta_cls_norm = sum(
-                float(torch.sum((state_after[n] - state_before[n]) ** 2).sqrt().cpu()) for n in self.classifier_names
+            # Compute task head delta norm (for monitoring only - not sent to server)
+            delta_head_norm = sum(
+                float(torch.sum((state_after[n] - state_before[n]) ** 2).sqrt().cpu())
+                for n in self.task_head_names if n in state_after
             )
             print(
                 f"[Client {self.cid}] samples={num_examples}, loss={loss:.4f}, "
-                f"deltaA_norm={delta_a_norm:.4e}, deltaCLS_norm={delta_cls_norm:.4e}"
+                f"deltaA_norm={delta_a_norm:.4e}, deltaHEAD_norm={delta_head_norm:.4e} [LOCAL]"
             )
 
             metrics = {"loss": float(loss)}
-            return delta_a_payload + delta_classifier, num_examples, metrics
+            return delta_a_payload, num_examples, metrics  # ONLY LoRA A deltas
         except Exception as exc:  # surface client-side errors to logs
             import traceback
 
