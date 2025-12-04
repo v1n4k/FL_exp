@@ -1,4 +1,3 @@
-method: fedsa_lora
 seed: 42
 
 lora:
@@ -20,6 +19,7 @@ data:
   dirichlet_alpha: 0.5
 
 train:
+  method: fedsa_lora
   num_clients: 5
   num_rounds: 3
   local_epochs: 1
